@@ -1,0 +1,45 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Logs
+logs/
+*.log
+
+# dotenv environment variables
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# Redis
+Redis/*.rdb
+Redis/*.dll
+Redis/*.exe
+Redis/*.pdb
+Redis/*.conf
+Redis/*.docx
+
+# Database
+*.sqlite
+*.db
+
+# Uploads
+uploads/
+
+# Storage
+storage/
+
+# Tokens
+tokens/
+
+# Outros
+*.bak
+*.tmp
