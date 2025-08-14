@@ -35,6 +35,13 @@ try {
 }
 
 // =========================
+// Inicia o job de reenvio automático de eventos pendentes do Redis
+try {
+    require('./src/jobs/redisEventResender');
+    console.log('Job de reenvio automático de eventos do Redis iniciado.');
+} catch (e) {
+    console.warn('Não foi possível iniciar o job de reenvio automático de eventos do Redis:', e.message);
+}
 
 // ...código existente...
 
