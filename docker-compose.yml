@@ -1,5 +1,43 @@
+
 version: '3.8'
 services:
+  bot:
+    build: .
+    container_name: whatsapp-bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      # Variáveis obrigatórias para produção (podem ser sobrescritas no .env)
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: whatsapp_bot
+      DB_USER: postgres
+      DB_PASS: senha_segura
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: senha_redis
+      STORAGE_ENDPOINT: minio
+      STORAGE_PORT: 9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      # Outras variáveis do .env podem ser adicionadas conforme necessário
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    volumes:
+      - ./logs:/app/logs
+      - ./media:/app/media
+      - ./storage:/app/storage
+      - ./uploads:/app/uploads
+      - ./userStates:/app/userStates
+      - ./tokens:/app/tokens
+
   postgres:
     image: postgres:14
     restart: always
@@ -11,6 +49,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
   redis:
     image: redis:6
     restart: always
@@ -19,6 +58,7 @@ services:
       - "6379:6379"
     volumes:
       - redisdata:/data
+
   minio:
     image: minio/minio
     restart: always
@@ -30,6 +70,7 @@ services:
     command: server /data
     volumes:
       - miniodata:/data
+
 volumes:
   pgdata:
   redisdata:
