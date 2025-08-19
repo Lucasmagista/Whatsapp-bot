@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whatsapp-bot-config
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  PUBLIC_HOST: "https://seu-dominio.com"
+  FRONTEND_URL: "https://seu-frontend.com"
+  CORS_ORIGINS: "https://seu-frontend.com"
+  LOG_LEVEL: "info"
+  JWT_EXPIRES_IN: "1d"
+  WHATSAPP_SESSION_NAME: "bot-principal"
+  WHATSAPP_MULTIDEVICE: "true"
+  NLP_PROVIDERS: "openai"
+  OPENAI_TIMEOUT_MS: "8000"
+  INTENT_CACHE_ENABLED: "false"
+  INTENT_CACHE_TTL: "600"
