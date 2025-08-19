@@ -1,5 +1,5 @@
 
-const { sendMessage } = require('../services/whatsappService');
+const { sendText } = require('../services/whatsappService');
 const { addToQueue } = require('../queue/messageQueue');
 const { processNLP } = require('../services/nlpOrchestrator');
 const logger = require('../utils/logger');
@@ -19,7 +19,7 @@ const send = [
       const { to, message, options, email, sms } = req.body;
   await addToQueue('message', { to, message, options });
   logger.info({ event: 'add_to_queue', to, user: req.user?.id, timestamp: new Date().toISOString() });
-  await sendMessage(to, message, options);
+  await sendText(to, message, options);
   logger.info({ event: 'send_message', to, user: req.user?.id, timestamp: new Date().toISOString() });
   // Envia para dashboard
   sendToDashboard('send_message', { to, message, options, user: req.user?.id, timestamp: new Date().toISOString() });

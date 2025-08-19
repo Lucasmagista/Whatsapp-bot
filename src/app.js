@@ -3,12 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
-const { initializeWhatsApp } = require('./services/whatsappService');
 const { connectDatabase } = require('./config/database');
 const redisConfig = require('./config/redis');
-const { initializeQueue } = require('./queue/messageQueue');
+const rateLimitMiddleware = require('./middleware/rateLimit');
+const { sequelize } = require('./config/database');
 const logger = require('./utils/logger');
 let Sentry;
 const sentryDsn = process.env.SENTRY_DSN;
@@ -24,6 +22,8 @@ if (sentryEnabled) {
 const path = require('path');
 
 const app = express();
+// Rate limit global
+app.use(rateLimitMiddleware);
 
 // Endpoint para monitorar status das filas Bull
 const { getQueueStatus } = require('./queue/messageQueue');
@@ -41,15 +41,7 @@ app.get('/queue-status', async (req, res) => {
 });
 // ...existing code...
 
-// Inicializa Redis com fallback Upstash/Local
-redisConfig.connectRedis()
-  .then(() => logger.info(`[Redis] Inicialização completa (${redisConfig.redisType})`))
-  .catch((err) => {
-    logger.error(`[Redis] Falha crítica ao inicializar Redis: ${err.message}`);
-    if (process.env.NODE_ENV !== 'test') {
-      process.exit(1);
-    }
-  });
+// Conexões (Redis/DB) são inicializadas em src/server.js
 
 // Rota de métricas Prometheus
 
@@ -59,6 +51,21 @@ app.use(metricsRouter);
 // Healthcheck endpoint para Kubernetes
 app.get('/healthz', (req, res) => {
   res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+// Readiness probe: valida DB e Redis
+app.get('/readyz', async (req, res) => {
+  try {
+    // Verifica DB
+    await sequelize.authenticate();
+    // Verifica Redis
+    if (redisConfig.redis) {
+      await redisConfig.redis.ping();
+    }
+    res.status(200).json({ status: 'ready' });
+  } catch (err) {
+    logger.error('Readiness check failed:', err);
+    res.status(503).json({ status: 'not_ready', error: err.message });
+  }
 });
 
 
@@ -120,69 +127,5 @@ app.use('/conversation', require('./routes/conversation'));
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
 });
-
-const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
-    credentials: true
-  }
-});
-
-async function startServer() {
-  try {
-    if (process.env.NODE_ENV !== 'test') {
-      await connectDatabase();
-      logger.info('✅ PostgreSQL connected');
-      if (sentryEnabled) { Sentry.captureMessage('PostgreSQL connected'); }
-
-      await connectRedis();
-      logger.info('✅ Redis connected');
-      if (sentryEnabled) {
-        Sentry.captureMessage('Redis connected');
-      }
-
-      await initializeQueue();
-      logger.info('✅ Queue system initialized');
-      if (sentryEnabled) {
-        Sentry.captureMessage('Queue system initialized');
-      }
-
-      // Inicialize o WhatsApp em paralelo
-      initializeWhatsApp(io)
-        .then(() => {
-          logger.info('✅ WhatsApp initialized');
-          if (sentryEnabled) {
-            Sentry.captureMessage('WhatsApp initialized');
-          }
-        })
-        .catch((err) => {
-          logger.error('Erro ao inicializar WhatsApp:', err);
-          if (sentryEnabled) {
-            Sentry.captureException(err);
-          }
-        });
-    }
-  } catch (error) {
-    logger.error('Failed to start server:', error);
-    if (sentryEnabled) {
-      Sentry.captureException(error);
-    }
-    // Só encerra o processo se não estiver em ambiente de teste
-    if (process.env.NODE_ENV !== 'test') {
-      process.exit(1);
-    }
-  }
-}
-
-if (process.env.NODE_ENV !== 'test') {
-  process.on('SIGTERM', async () => {
-    logger.info('SIGTERM received. Shutting down gracefully...');
-    server.close(() => {
-      logger.info('Server closed');
-    });
-  });
-  startServer();
-}
 
 module.exports = app;

@@ -1,9 +1,12 @@
 
 // Rate Limit Middleware Avançado
 const rateLimit = require('express-rate-limit');
-const RedisStore = require('rate-limit-redis');
+let RedisStoreCtor = null;
+try {
+  const mod = require('rate-limit-redis');
+  RedisStoreCtor = mod.RedisStore || mod;
+} catch {}
 const redisConfig = require('../config/redis');
-const redis = redisConfig.redis;
 
 const logger = require('../utils/logger');
 const Sentry = require('@sentry/node');
@@ -28,7 +31,7 @@ function getLimitType(req) {
   return 'default';
 }
 
-const limiter = (req, res, next) => {
+const memoryLimiter = (req, res, next) => {
   const ip = req.ip;
   const now = Date.now();
   const type = getLimitType(req);
@@ -70,4 +73,39 @@ const limiter = (req, res, next) => {
   next();
 };
 
-module.exports = limiter;
+// Lazy: cria o limiter distribuído somente quando Redis está disponível
+let distributedLimiter = null;
+function getDistributedLimiter() {
+  if (!RedisStoreCtor) return null;
+  if (!redisConfig.redis) return null;
+  if (distributedLimiter) return distributedLimiter;
+  distributedLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new RedisStoreCtor({
+      sendCommand: async (...args) => {
+        const client = redisConfig.redis;
+        if (!client) throw new Error('Redis client not available');
+        if (typeof client.call === 'function') {
+          return client.call(...args);
+        }
+        if (typeof client.sendCommand === 'function') {
+          return client.sendCommand(args);
+        }
+        if (typeof client.send_command === 'function') {
+          return client.send_command(...args);
+        }
+        throw new Error('Redis client does not support call/sendCommand');
+      }
+    })
+  });
+  return distributedLimiter;
+}
+
+module.exports = (req, res, next) => {
+  const dl = getDistributedLimiter();
+  if (dl) return dl(req, res, next);
+  return memoryLimiter(req, res, next);
+};

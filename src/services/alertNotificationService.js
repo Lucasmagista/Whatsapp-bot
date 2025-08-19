@@ -33,8 +33,10 @@ const alertNotificationService = {
   },
   async sendWhatsApp(message, whatsappService) {
     try {
-      // Supondo que whatsappService tenha método sendMessage
-      await whatsappService.sendMessage(message);
+      // Espera-se que whatsappService exponha sendText(to, message)
+      const { to, text, options } = typeof message === 'string' ? { to: process.env.ALERT_WHATSAPP_TO, text: message } : message;
+      if (!to) throw new Error('Destinatário WhatsApp (to) não informado');
+      await whatsappService.sendText(to, text || '', options);
     } catch (err) {
       console.error('Erro ao enviar alerta para WhatsApp:', err.message);
     }

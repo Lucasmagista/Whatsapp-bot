@@ -10,21 +10,22 @@ async function initializeWhatsApp(io) {
     session: 'default',
     catchQR: (base64Qr, asciiQR, attempts, urlCode) => {
       if (base64Qr) {
-  const logger = require('../utils/logger');
-  logger.info('Emitindo evento whatsapp-qr', { attempts, hasQr: true, base64QrLength: base64Qr.length });
+        const logger = require('../utils/logger');
+        logger.info('Emitindo evento whatsapp-qr', { attempts, hasQr: true, base64QrLength: base64Qr.length });
         // Exibir QR em ASCII no terminal
         if (asciiQR && asciiQR.length > 0) {
           logger.info('QR Code para escanear no terminal:');
           logger.info(asciiQR);
         }
         // Link para abrir a página web de escaneamento do QR Code
-  logger.info('Abra a página para escanear o QR Code:');
-  logger.info('http://localhost:3000/whatsapp-qr.html');
+        const publicHost = process.env.PUBLIC_HOST || 'http://localhost:3001';
+        logger.info('Abra a página para escanear o QR Code:');
+        logger.info(`${publicHost}/whatsapp-qr.html`);
       } else {
-  logger.warn('NÃO FOI GERADO QR CODE! Apague a pasta tokens/default ou sessions/default e reinicie o servidor.');
+        logger.warn('NÃO FOI GERADO QR CODE! Apague a pasta tokens/default ou sessions/default e reinicie o servidor.');
       }
-  io.emit('whatsapp-qr', { qr: base64Qr, attempts });
-  sendToDashboard('whatsapp-qr', { qr: base64Qr, attempts });
+      io.emit('whatsapp-qr', { qr: base64Qr, attempts });
+      sendToDashboard('whatsapp-qr', { qr: base64Qr, attempts });
     },
     statusFind: (statusSession, session) => {
   io.emit('whatsapp-status', { status: statusSession, session });
@@ -44,7 +45,7 @@ async function initializeWhatsApp(io) {
 
   // Handler para responder automaticamente a qualquer mensagem recebida
   const { transcribeAudio } = require('./whisperService');
-  const { getAIResponse } = require('./aiService');
+  const { processNLP } = require('./nlpOrchestrator');
   let userState = {};
   async function handleAudioMessage(message) {
     const mediaData = await client.downloadMedia(message);
@@ -63,7 +64,7 @@ async function initializeWhatsApp(io) {
       await client.sendText(message.from, 'Olá! Qual seu nome?');
       userState[message.from] = { step: 'ask_name', lastTranscript: transcript };
     } else if (transcript) {
-      const aiResult = await getAIResponse(transcript, { phoneNumber: message.from });
+      const aiResult = await processNLP(transcript, { phoneNumber: message.from });
       await client.sendText(message.from, aiResult.response);
       userState[message.from].intent = aiResult.intent;
       userState[message.from].lastTranscript = transcript;
@@ -76,7 +77,7 @@ async function initializeWhatsApp(io) {
   }
 
   async function handleTextMessage(message) {
-    const aiResult = await getAIResponse(message.body, { phoneNumber: message.from });
+    const aiResult = await processNLP(message.body, { phoneNumber: message.from });
     if (!aiResult?.response) {
       logger.error('Resposta da IA veio nula ou inválida:', aiResult);
       await client.sendText(message.from, 'Desculpe, não consegui processar sua mensagem no momento.');

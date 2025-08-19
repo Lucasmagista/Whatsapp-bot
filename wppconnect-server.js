@@ -1,62 +1,6 @@
-const { initializeWhatsApp } = require('./src/services/whatsappService');
-// wppconnect-server.js
-// Servidor WhatsApp completo usando WPPConnect com fluxo conversacional robusto
-
-const express = require('express');
-const app = express();
-app.use(express.json());
-// Rotas REST para dashboard/admin
-app.use('/admin', require('./src/routes/admin'));
-
-// Definição da porta do servidor
-const PORT = process.env.PORT || 3000;
-
-const fs = require('fs');
-const { Pool } = require('pg');
-let Sentry;
-try {
-    Sentry = require('@sentry/node');
-} catch (err) {
-    // Sentry is optional; log the failure instead of silently ignoring it
-    console.warn('Sentry not loaded (optional). Continuing without Sentry:', err?.message);
-    Sentry = null;
-}
-const path = require('path');
-const { create, Client } = require('@wppconnect-team/wppconnect');
-// Import axios conditionally for optional NLP integration
-let axios;
-try {
-    // axios is used for HTTP calls to third‑party NLP services (e.g. OpenAI)
-    axios = require('axios');
-} catch (err) {
-    // axios não está disponível; classificação com serviço externo ficará indisponível
-    console.warn('Axios not loaded (optional). Continuing without axios:', err?.message);
-    axios = null;
-}
-
-// =========================
-
-// ...código existente...
-
-// (depois de todas as configurações e definição de PORT)
-// Inicialização do WhatsApp (com ou sem socket.io)
-let io = null;
-try {
-    const http = require('http').createServer(app);
-    io = require('socket.io')(http, { cors: { origin: '*' } });
-    http.listen(PORT, () => {
-        console.log(`Servidor rodando na porta ${PORT}`);
-    });
-    // Inicializa WhatsApp (com io)
-    initializeWhatsApp(io);
-} catch (err) {
-    // Se não usar socket.io, apenas inicie o app normalmente
-    app.listen(PORT, () => {
-        console.log(`Servidor rodando na porta ${PORT}`);
-    });
-    // Inicializa WhatsApp (sem io)
-    initializeWhatsApp();
-}
+// Este arquivo foi descontinuado. Use `node src/server.js` como entrypoint.
+console.warn('wppconnect-server.js foi descontinuado. Use `npm start` (node src/server.js).');
+process.exit(0);
 // UTILITÁRIOS DE CLASSIFICAÇÃO DE INTENÇÃO
 // =========================
 /**

@@ -22,12 +22,46 @@ spec:
           value: "production"
         - name: PORT
           value: "3001"
+        volumeMounts:
+        - name: wpp-sessions
+          mountPath: /app/sessions
+        - name: wpp-tokens
+          mountPath: /app/tokens
+        - name: media
+          mountPath: /app/media
+        - name: logs
+          mountPath: /app/logs
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 3001
+          initialDelaySeconds: 15
+          periodSeconds: 20
         - name: DB_HOST
           valueFrom:
             secretKeyRef:
               name: db-secrets
               key: DB_HOST
         # ...demais variáveis de ambiente
+      volumes:
+      - name: wpp-sessions
+        persistentVolumeClaim:
+          claimName: wpp-sessions-pvc
+      - name: wpp-tokens
+        persistentVolumeClaim:
+          claimName: wpp-tokens-pvc
+      - name: media
+        persistentVolumeClaim:
+          claimName: media-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: logs-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -41,3 +75,47 @@ spec:
       port: 80
       targetPort: 3001
   type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wpp-sessions-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wpp-tokens-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

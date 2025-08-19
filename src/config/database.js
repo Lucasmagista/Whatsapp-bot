@@ -1,5 +1,6 @@
 // Database configuration for PostgreSQL
 const { Sequelize } = require('sequelize');
+const logger = require('../utils/logger');
 
 const sequelize = new Sequelize(
   process.env.DB_NAME,
@@ -19,10 +20,9 @@ const sequelize = new Sequelize(
 const connectDatabase = async () => {
   try {
     await sequelize.authenticate();
-  const logger = require('../utils/logger');
-  logger.info('PostgreSQL connected');
+    logger.info('PostgreSQL connected');
   } catch (error) {
-  logger.error('Unable to connect to PostgreSQL:', error);
+    logger.error('Unable to connect to PostgreSQL:', error);
     throw error;
   }
 };
