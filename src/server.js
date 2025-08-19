@@ -5,7 +5,8 @@ const logger = require('./utils/logger');
 const { connectDatabase } = require('./config/database');
 const redisConfig = require('./config/redis');
 const { initializeQueue, queues } = require('./queue/messageQueue');
-const { initializeWhatsApp } = require('./services/whatsappService');
+const { initializeWhatsApp, shutdownWhatsApp } = require('./services/whatsappService');
+const { initSecretManager } = require('./utils/jwtSecretManager');
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
@@ -34,6 +35,14 @@ async function bootstrap() {
       initializeWhatsApp(io)
         .then(() => logger.info('✅ WhatsApp initialized'))
         .catch((err) => logger.error('Erro ao inicializar WhatsApp:', err));
+
+      // Inicializa rotação de segredo JWT (depende de Redis)
+      try {
+        await initSecretManager();
+        logger.info('✅ JWT Secret Manager initialized');
+      } catch (e) {
+        logger.error('Erro ao inicializar JWT Secret Manager:', e);
+      }
     } else {
       logger.info('Skipping external services bootstrap (test/smoke mode)');
     }
@@ -49,6 +58,8 @@ async function bootstrap() {
         server.close(() => {
           logger.info('HTTP server closed');
         });
+        // Fecha WhatsApp
+        await shutdownWhatsApp();
         // Fecha filas Bull
         if (queues) {
           const closePromises = Object.values(queues)

@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.DS_Store
+logs
+media
+uploads
+sessions
+tokens
+coverage
+.env
+.env.*

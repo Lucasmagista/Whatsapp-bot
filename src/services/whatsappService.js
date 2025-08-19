@@ -216,7 +216,19 @@ async function sendText(to, message) {
   return result;
 }
 
+async function shutdownWhatsApp() {
+  try {
+    if (client && typeof client.close === 'function') {
+      await client.close();
+    }
+  } catch (err) {
+    const logger = require('../utils/logger');
+    logger.error('Erro ao encerrar WhatsApp client:', err);
+  }
+}
+
 module.exports = {
   initializeWhatsApp,
-  sendText
+  sendText,
+  shutdownWhatsApp
 };
