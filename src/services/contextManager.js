@@ -2,7 +2,7 @@
 async function updateUserPreferences(userId, preferences) {
   const context = await getUserContext(userId);
   context.preferences = { ...context.preferences, ...preferences };
-  await redis.set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
+  await getRedis().set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
   return context;
 }
 
@@ -37,14 +37,14 @@ const { Configuration, OpenAIApi } = require('openai');
 const fetch = require('node-fetch');
 
 async function getUserContext(userId) {
-  const data = await redis.get(`context:${userId}`);
+  const data = await getRedis().get(`context:${userId}`);
   return data ? JSON.parse(data) : { history: [], language: 'pt', feedback: [] };
 }
 
 async function updateUserContext(userId, update) {
   const context = await getUserContext(userId);
   const newContext = { ...context, ...update };
-  await redis.set(`context:${userId}`, JSON.stringify(newContext), 'EX', 86400);
+  await getRedis().set(`context:${userId}`, JSON.stringify(newContext), 'EX', 86400);
   return newContext;
 }
 
@@ -52,7 +52,7 @@ async function addMessageToHistory(userId, message, role = 'user') {
   const context = await getUserContext(userId);
   context.history.push({ role, message, timestamp: new Date().toISOString() });
   if (context.history.length > 20) context.history.shift();
-  await redis.set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
+  await getRedis().set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
   return context;
 }
 
@@ -100,7 +100,7 @@ async function translateText(text, targetLang) {
 async function addUserFeedback(userId, feedback) {
   const context = await getUserContext(userId);
   context.feedback.push({ ...feedback, timestamp: new Date().toISOString() });
-  await redis.set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
+  await getRedis().set(`context:${userId}`, JSON.stringify(context), 'EX', 86400);
   return context;
 }
 
