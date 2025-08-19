@@ -78,6 +78,9 @@ let distributedLimiter = null;
 function getDistributedLimiter() {
   if (!RedisStoreCtor) return null;
   if (!redisConfig.redis) return null;
+  const client = redisConfig.redis;
+  const supportsCommands = client && (typeof client.call === 'function' || typeof client.sendCommand === 'function' || typeof client.send_command === 'function');
+  if (!supportsCommands) return null;
   if (distributedLimiter) return distributedLimiter;
   distributedLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,

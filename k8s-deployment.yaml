@@ -22,6 +22,12 @@ spec:
           value: "production"
         - name: PORT
           value: "3001"
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: db-secrets
+              key: DB_HOST
+        # ...demais variáveis de ambiente
         volumeMounts:
         - name: wpp-sessions
           mountPath: /app/sessions
@@ -43,12 +49,6 @@ spec:
             port: 3001
           initialDelaySeconds: 15
           periodSeconds: 20
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: db-secrets
-              key: DB_HOST
-        # ...demais variáveis de ambiente
       volumes:
       - name: wpp-sessions
         persistentVolumeClaim:
