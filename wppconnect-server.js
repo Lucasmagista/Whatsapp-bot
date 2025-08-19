@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { initializeWhatsApp } = require('./src/services/whatsappService');
 // wppconnect-server.js
 // Servidor WhatsApp completo usando WPPConnect com fluxo conversacional robusto
@@ -35,6 +36,18 @@ try {
 }
 
 // =========================
+// Garante conexão Redis ANTES de iniciar jobs que dependem do Redis
+const { connectRedis } = require('./src/config/redis');
+(async () => {
+    try {
+        await connectRedis();
+        // Só agora inicia o job de reenvio automático de eventos do Redis
+        require('./src/jobs/redisEventResender');
+        console.log('Job de reenvio automático de eventos do Redis iniciado.');
+    } catch (e) {
+        console.warn('Não foi possível iniciar o job de reenvio automático de eventos do Redis:', e.message);
+    }
+})();
 
 // ...código existente...
 
@@ -171,13 +184,19 @@ const LOGS_FOLDER = './logs/';
 const USER_STATE_DIR = path.join(__dirname, 'userStates');
 
 // Inicializa Sentry para observabilidade (se fornecido)
-if (Sentry && process.env.SENTRY_DSN) {
+if (Sentry && process.env.SENTRY_DSN && Sentry.Handlers && typeof Sentry.Handlers.requestHandler === 'function') {
     Sentry.init({
         dsn: process.env.SENTRY_DSN,
         tracesSampleRate: parseFloat(process.env.SENTRY_SAMPLE_RATE || '1.0')
     });
     // Middleware de request do Sentry
     app.use(Sentry.Handlers.requestHandler());
+} else if (Sentry && process.env.SENTRY_DSN) {
+    Sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        tracesSampleRate: parseFloat(process.env.SENTRY_SAMPLE_RATE || '1.0')
+    });
+    console.warn('Sentry Handlers não estão disponíveis. Middleware de requestHandler não será usado.');
 }
 
 // Inicializa pool de conexão PostgreSQL se as variáveis de ambiente estiverem configuradas

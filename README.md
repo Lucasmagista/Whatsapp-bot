@@ -1,3 +1,18 @@
+# Segurança e Produção
+
+## HTTPS na Dashboard
+Veja `Docs/HTTPS_DEPLOYMENT.md` para instruções de como proteger sua dashboard com HTTPS (Express nativo ou proxy reverso).
+
+## Jobs de reenvio automáticos de eventos do Redis
+O job `src/jobs/redisEventResender.js` faz o reenvio periódico de eventos não processados do Redis para a dashboard/API. Para ativar, basta importar e rodar esse arquivo junto ao servidor principal:
+
+```js
+// No seu entrypoint (ex: wppconnect-server.js)
+require('./src/jobs/redisEventResender');
+```
+
+## Variáveis de ambiente
+Veja o arquivo `.env.example` para todas as variáveis obrigatórias e recomendadas.
 
 # Arquitetura NLP/IA Robusta
 
