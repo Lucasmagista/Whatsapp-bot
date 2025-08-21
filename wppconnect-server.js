@@ -1,3 +1,5 @@
+// Utilitário de e-mail
+const { sendEmail } = require('./src/utils/email');
 require('dotenv').config();
 const { initializeWhatsApp } = require('./src/services/whatsappService');
 // wppconnect-server.js
@@ -13,13 +15,14 @@ app.use('/admin', require('./src/routes/admin'));
 const PORT = process.env.PORT || 3000;
 
 const fs = require('fs');
+const logger = require('./src/utils/logger');
 const { Pool } = require('pg');
 let Sentry;
 try {
     Sentry = require('@sentry/node');
 } catch (err) {
     // Sentry is optional; log the failure instead of silently ignoring it
-    console.warn('Sentry not loaded (optional). Continuing without Sentry:', err?.message);
+    logger.warn('Sentry not loaded (optional). Continuing without Sentry:', err?.message);
     Sentry = null;
 }
 const path = require('path');
@@ -31,8 +34,59 @@ try {
     axios = require('axios');
 } catch (err) {
     // axios não está disponível; classificação com serviço externo ficará indisponível
-    console.warn('Axios not loaded (optional). Continuing without axios:', err?.message);
+    logger.warn('Axios not loaded (optional). Continuing without axios:', err?.message);
     axios = null;
+// =========================
+// IMPLEMENTAÇÃO DO CÓDIGO SOLICITADO PELO USUÁRIO
+// =========================
+
+// Funções globais para load/save userState (implementação de exemplo; ajuste para DB ou arquivo)
+global.loadUserState = async (userId) => {
+    // Exemplo com arquivo; use dbPool se configurado
+    const filePath = path.join(USER_STATE_DIR, `${userId}.json`);
+    if (fs.existsSync(filePath)) {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+    return { step: 'start', data: {} };
+};
+
+global.saveUserState = async (userId, state) => {
+    const filePath = path.join(USER_STATE_DIR, `${userId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(state));
+};
+
+// Inicializar WPPConnect (implementação de exemplo)
+let wppClient;
+let isReady = false;
+async function initializeWPPConnect() {
+    wppClient = await create({
+        session: 'sessionName',
+        puppeteerOptions: { args: ['--no-sandbox'] }
+    });
+    wppClient.on('ready', () => {
+        isReady = true;
+        console.log('WhatsApp pronto!');
+    });
+    wppClient.on('message', async (message) => {
+        const userState = await global.loadUserState(message.from);
+        const { response, newStep, data } = await ConversationFlow.processMessage(message, userState);
+        if (response) {
+            await wppClient.sendText(message.from, response);
+            data.lastBotResponse = response;
+            data.lastInteraction = new Date().toISOString();
+        }
+        await global.saveUserState(message.from, { step: newStep, data });
+    });
+}
+
+// Função de logEvent (implementação de exemplo usando structuredLog)
+function logEvent(event, data) {
+    structuredLog(event, data);
+}
+
+// =========================
+// FIM DA IMPLEMENTAÇÃO DO CÓDIGO SOLICITADO PELO USUÁRIO
+// =========================
 }
 
 // =========================
@@ -43,13 +97,12 @@ const { connectRedis } = require('./src/config/redis');
         await connectRedis();
         // Só agora inicia o job de reenvio automático de eventos do Redis
         require('./src/jobs/redisEventResender');
-        console.log('Job de reenvio automático de eventos do Redis iniciado.');
+    logger.info('Job de reenvio automático de eventos do Redis iniciado.');
     } catch (e) {
-        console.warn('Não foi possível iniciar o job de reenvio automático de eventos do Redis:', e.message);
+    logger.warn('Não foi possível iniciar o job de reenvio automático de eventos do Redis:', e.message);
     }
 })();
 
-// ...código existente...
 
 // (depois de todas as configurações e definição de PORT)
 // Inicialização do WhatsApp (com ou sem socket.io)
@@ -58,14 +111,14 @@ try {
     const http = require('http').createServer(app);
     io = require('socket.io')(http, { cors: { origin: '*' } });
     http.listen(PORT, () => {
-        console.log(`Servidor rodando na porta ${PORT}`);
+    logger.info(`Servidor rodando na porta ${PORT}`);
     });
     // Inicializa WhatsApp (com io)
     initializeWhatsApp(io);
 } catch (err) {
     // Se não usar socket.io, apenas inicie o app normalmente
     app.listen(PORT, () => {
-        console.log(`Servidor rodando na porta ${PORT}`);
+    logger.info(`Servidor rodando na porta ${PORT}`);
     });
     // Inicializa WhatsApp (sem io)
     initializeWhatsApp();
@@ -365,23 +418,7 @@ class ConversationFlow {
             return await this.handleAudioMessage(message, userState);
         }
 
-        // Detecta payload do catálogo web
-        if (messageBody.startsWith('pedido via site:')) {
-            const pedidoDetalhes = message.body.substring('pedido via site:'.length).trim();
-            return {
-                response: '🛒 Recebemos seu pedido do site! Para finalizar, por favor informe seu *nome completo*:',
-                newStep: 'purchase_catalog_awaiting_name',
-                data: {
-                    ...userState?.data,
-                    catalogOrderPayload: pedidoDetalhes
-                }
-            };
-        }
-
-        // Encaminha para fluxo de compra via catálogo
-        if (currentStep?.startsWith('purchase_catalog_')) {
-            return await this.handlePurchaseCatalog(message, userState);
-        }
+    // ...existing code...
 
         console.log(`🔄 Processando fluxo - Usuário: ${message.from}, Passo: ${currentStep}, Mensagem: "${messageBody}"`);
         
@@ -399,7 +436,11 @@ class ConversationFlow {
             case 'awaiting_curriculo_pdf':
             case 'curriculo_ask_channel':
             case 'curriculo_ask_channel_outro':
+            case 'curriculo_ask_email':
+            case 'curriculo_ask_phone':
+            case 'curriculo_ask_area':
             case 'awaiting_curriculo_pdf_file':
+            case 'curriculo_post_confirm':
             case 'curriculo_post_answer':
                 return await this.handleCurriculo(message, userState);
             
@@ -439,13 +480,7 @@ class ConversationFlow {
             case 'product_issue_comments':
                 return this.handleProductIssue(message, userState);
             
-            // Fluxo de compra tradicional
-            case 'purchase_product_name':
-            case 'purchase_product_link':
-            case 'purchase_product_photo':
-            case 'purchase_quantity':
-            case 'purchase_questions':
-                return await this.handlePurchase(message, userState);
+            // ...existing code...
             
             // Fluxo de carrinho
             case 'cart_start':
@@ -491,24 +526,24 @@ class ConversationFlow {
             .trim();
     }
     
-    static handleStart(message) {
+    /**
+     * Novo handleStart: envia 3 mensagens separadas simulando typing.
+     * @param {object} message
+     * @returns {Promise<null>} Sempre retorna null pois o envio é feito diretamente.
+     */
+    static async handleStart(message) {
         const messageBody = this.normalizeText(message.body);
-        
-        // Se usuário disse "oi", reiniciar conversa
-        if (messageBody === 'oi' || messageBody === 'ola' || messageBody === 'inicio' || messageBody === 'reinciar') {
-            return {
-                response: '🏠 *Inaugura Lar - Atendimento Especializado* 🏠\n\nOlá! 👋 Seja bem-vindo(a) ao nosso canal de atendimento. Estamos aqui para resolver seu problema com agilidade e qualidade.\n\nPara iniciarmos o atendimento personalizado, por favor informe:\n\n*Nome completo:*',
-                newStep: 'awaiting_name',
-                data: {}
-            };
-        }
-        
-        // Primeira mensagem
-        return {
-            response: '🏠 *Inaugura Lar - Atendimento Especializado* 🏠\n\nOlá! 👋 Seja bem-vindo(a) ao nosso canal de atendimento. Estamos aqui para resolver seu problema com agilidade e qualidade.\n\nPara iniciarmos o atendimento personalizado, por favor informe:\n\n*Nome completo:*',
-            newStep: 'awaiting_name',
-            data: {}
-        };
+        const chatId = message.from;
+        const welcomeMessages = [
+            '🏠 *Inaugura Lar - Atendimento Especializado* 🏠',
+            'Olá! 👋 Seja bem-vindo(a) ao nosso canal de atendimento. Estamos aqui para resolver seu problema com agilidade e qualidade.',
+            'Para iniciarmos o atendimento personalizado, por favor informe:\n\n*Nome completo:*'
+        ];
+        await sendMultipleWithTyping(chatId, welcomeMessages, 2000);
+        // Atualiza o estado do usuário para aguardar nome
+        const userState = { step: 'awaiting_name', data: {} };
+        await global.saveUserState(chatId, userState);
+        return null;
     }
     
     static handleName(message, userState) {
@@ -1046,6 +1081,62 @@ class ConversationFlow {
                 };
             }
             data.curriculoChannel = channel;
+            // Após canal, pedir e-mail
+            return {
+                response: 'Ótimo! Para continuarmos, por favor informe seu e-mail:',
+                newStep: 'curriculo_ask_email',
+                data
+            };
+        }
+
+        // Novo: pedir e-mail
+        if (step === 'curriculo_ask_email') {
+            // Validação simples de e-mail
+            const emailRegex = /^[\w-.]+@[\w-]+\.[a-zA-Z]{2,}$/;
+            if (!emailRegex.test(bodyRaw)) {
+                return {
+                    response: 'E-mail inválido. Por favor, digite um e-mail válido:',
+                    newStep: 'curriculo_ask_email',
+                    data
+                };
+            }
+            data.curriculoEmail = bodyRaw;
+            return {
+                response: 'Agora, por favor informe seu telefone (com DDD):',
+                newStep: 'curriculo_ask_phone',
+                data
+            };
+        }
+
+        // Novo: pedir telefone
+        if (step === 'curriculo_ask_phone') {
+            // Validação simples de telefone (mínimo 10 dígitos)
+            const phone = bodyRaw.replace(/\D/g, '');
+            if (phone.length < 10) {
+                return {
+                    response: 'Telefone inválido. Por favor, digite um telefone válido com DDD:',
+                    newStep: 'curriculo_ask_phone',
+                    data
+                };
+            }
+            data.curriculoPhone = bodyRaw;
+            return {
+                response: 'Por fim, qual sua área de interesse? (Exemplo: Vendas, Administrativo, Logística, etc.)',
+                newStep: 'curriculo_ask_area',
+                data
+            };
+        }
+
+        // Novo: pedir área de interesse
+        if (step === 'curriculo_ask_area') {
+            if (!bodyRaw || bodyRaw.length < 2) {
+                return {
+                    response: 'Por favor, informe sua área de interesse (Exemplo: Vendas, Administrativo, Logística, etc.):',
+                    newStep: 'curriculo_ask_area',
+                    data
+                };
+            }
+            data.curriculoArea = bodyRaw;
             return {
                 response: 'Ótimo! Agora, por favor, envie seu currículo em PDF (anexe o arquivo nesta conversa).\n\nCaso não tenha em PDF, pode enviar uma foto (imagem) do seu currículo.',
                 newStep: 'awaiting_curriculo_pdf_file',
@@ -1072,8 +1163,11 @@ class ConversationFlow {
         
         // 3. Receber o PDF ou imagem
         if (step === 'awaiting_curriculo_pdf_file') {
+            // Log início da etapa
+            structuredLog('curriculo_step', { chatId: message.from, step, data });
             // Se for anexo normal (mídia)
             if (message.hasMedia) {
+                structuredLog('curriculo_recebendo_arquivo', { chatId: message.from, step, data });
                 const media = await message.downloadMedia();
                 // Validação de tipo permitido
                 const mimetype = media?.mimetype || '';
@@ -1116,35 +1210,80 @@ class ConversationFlow {
                 const filePath = path.join(PDF_UPLOAD_FOLDER, fileName);
                 try {
                     // Salva com segurança com retries
-                    if (isPDF) {
-                        let buffer;
-                        if (typeof media.data === 'string') {
-                            buffer = Buffer.from(media.data, 'base64');
-                        } else if (Buffer.isBuffer(media.data)) {
-                            buffer = media.data;
-                        } else {
-                            buffer = Buffer.from(media.data, 'base64');
-                        }
-                        await safeWriteFile(filePath, buffer);
-                    } else if (isImage) {
-                        // Converte base64 string para buffer
-                        let buffer;
-                        if (typeof media.data === 'string') {
-                            buffer = Buffer.from(media.data, 'base64');
-                        } else if (Buffer.isBuffer(media.data)) {
-                            buffer = media.data;
-                        } else {
-                            buffer = Buffer.from(media.data, 'base64');
-                        }
-                        await safeWriteFile(filePath, buffer);
+                    let buffer;
+                    if (typeof media.data === 'string') {
+                        buffer = Buffer.from(media.data, 'base64');
+                    } else if (Buffer.isBuffer(media.data)) {
+                        buffer = media.data;
+                    } else {
+                        buffer = Buffer.from(media.data, 'base64');
                     }
+                    await safeWriteFile(filePath, buffer);
                     structuredLog('curriculo_received', {
                         from: message.from,
                         fileName,
                         filePath,
                         channel: data.curriculoChannel,
-                        sizeBytes
+                        sizeBytes,
+                        email: data.curriculoEmail,
+                        phone: data.curriculoPhone,
+                        area: data.curriculoArea
                     });
+                    // Salvar no banco de dados (Postgres)
+                    if (dbPool) {
+                        try {
+                            await dbPool.query(
+                                `INSERT INTO curriculos (user_id, nome, canal, email, telefone, area, file_name, file_path, file_type, file_size, enviado_em)
+                                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())`,
+                                [
+                                    message.from,
+                                    data.name || '',
+                                    data.curriculoChannel || '',
+                                    data.curriculoEmail || '',
+                                    data.curriculoPhone || '',
+                                    data.curriculoArea || '',
+                                    fileName,
+                                    filePath,
+                                    mimetype,
+                                    sizeBytes
+                                ]
+                            );
+                            structuredLog('curriculo_db_saved', { chatId: message.from, fileName });
+                        } catch (err) {
+                            structuredLog('curriculo_db_error', { chatId: message.from, error: err.message });
+                        }
+                    }
+                    // Notificação interna para RH (WhatsApp e e-mail)
+                    try {
+                        const rhNumber = process.env.RH_PHONE;
+                        const rhEmail = process.env.RH_EMAIL;
+                        const resumo = `Novo currículo recebido:\n\nNome: ${data.name || ''}\nCanal: ${data.curriculoChannel || ''}\nE-mail: ${data.curriculoEmail || ''}\nTelefone: ${data.curriculoPhone || ''}\nÁrea: ${data.curriculoArea || ''}\nArquivo: ${fileName}\nTamanho: ${(sizeBytes/1024).toFixed(1)} KB`;
+                        if (globalThis.wppClient && rhNumber) {
+                            await globalThis.wppClient.sendText(rhNumber, resumo);
+                            // Envia o arquivo do currículo para o RH
+                            try {
+                                await globalThis.wppClient.sendFile(
+                                    rhNumber,
+                                    filePath,
+                                    fileName,
+                                    `Currículo recebido de ${data.name || ''}\nCanal: ${data.curriculoChannel || ''}\nE-mail: ${data.curriculoEmail || ''}\nTelefone: ${data.curriculoPhone || ''}\nÁrea: ${data.curriculoArea || ''}`
+                                );
+                            } catch (err) {
+                                structuredLog('curriculo_sendfile_rh_error', { chatId: message.from, error: err.message });
+                            }
+                        }
+                        if (rhEmail) {
+                            await sendEmail({
+                                to: rhEmail,
+                                subject: 'Novo currículo recebido',
+                                text: resumo,
+                                html: `<pre>${resumo}</pre>`
+                            });
+                        }
+                        structuredLog('curriculo_notify_rh', { chatId: message.from, rhNumber, rhEmail });
+                    } catch (err) {
+                        structuredLog('curriculo_notify_rh_error', { chatId: message.from, error: err.message });
+                    }
                 } catch (e) {
                     console.error('Erro ao salvar currículo:', e.message);
                     structuredLog('curriculo_save_error', { from: message.from, error: e.message });
@@ -1154,11 +1293,17 @@ class ConversationFlow {
                         data
                     };
                 }
+                // Salva detalhes para confirmação
+                data.curriculoFile = {
+                    fileName,
+                    filePath,
+                    mimetype,
+                    size: sizeBytes
+                };
                 return {
-                    response: '✅ Currículo recebido com sucesso! Muito obrigado pelo interesse! Nossa equipe irá analisar seu perfil e, caso haja compatibilidade, entraremos em contato.\n\nPosso te ajudar com mais alguma coisa?\n\n*1* - Sim\n*2* - Não',
-                    newStep: 'curriculo_post_answer',
-                    data: data,
-                    finalizeSession: false
+                    response: `✅ Currículo recebido!\n\n*Arquivo:* ${fileName}\n*Tipo:* ${mimetype}\n*Tamanho:* ${(sizeBytes/1024).toFixed(1)} KB\n\nDeseja confirmar o envio deste arquivo?\n\n*1*. Sim, está correto\n*2*. Não, quero reenviar`,
+                    newStep: 'curriculo_post_confirm',
+                    data
                 };
             }
             // Se o usuário enviou base64 da imagem no corpo da mensagem
@@ -1216,7 +1361,35 @@ class ConversationFlow {
             };
         }
         
-        // 4. Pós-envio do currículo
+        // 4. Confirmação pós-upload
+        if (step === 'curriculo_post_confirm') {
+            if (body === '1' || body === 'sim') {
+                // Confirma e finaliza
+                return {
+                    response: '🎉 Seu currículo foi enviado com sucesso e será analisado pelo nosso RH. Obrigado pelo interesse! Se desejar, pode voltar ao menu principal digitando "menu".',
+                    newStep: 'start',
+                    data
+                };
+            } else if (body === '2' || body === 'nao' || body === 'não') {
+                // Remove arquivo anterior se desejar reenviar
+                if (data.curriculoFile && data.curriculoFile.filePath && fs.existsSync(data.curriculoFile.filePath)) {
+                    try { fs.unlinkSync(data.curriculoFile.filePath); } catch {}
+                }
+                delete data.curriculoFile;
+                return {
+                    response: 'Ok, envie novamente seu currículo em PDF ou imagem (até 5MB).',
+                    newStep: 'awaiting_curriculo_pdf_file',
+                    data
+                };
+            } else {
+                return {
+                    response: 'Por favor, responda *1* para confirmar o envio ou *2* para reenviar o arquivo.',
+                    newStep: 'curriculo_post_confirm',
+                    data
+                };
+            }
+        }
+        // 5. Pós-envio do currículo (antigo step)
         if (step === 'curriculo_post_answer') {
             const answer = body.trim().toLowerCase();
             if (answer === '1' || answer === 'sim' || answer === 's' || answer === 'si') {
@@ -1576,215 +1749,6 @@ class ConversationFlow {
             default:
                 return {
                     response: '❌ Fluxo de compra não reconhecido. Digite "menu" para voltar ao início.',
-                    newStep: 'start',
-                    data: userData
-                };
-        }
-    }
-
-    // =========================
-    // FLUXO DE COMPRA VIA CATÁLOGO
-    // =========================
-    static async handlePurchaseCatalog(message, userState) {
-        const step = userState.step;
-        const userData = userState.data || {};
-        
-        switch (step) {
-            case 'purchase_catalog_awaiting_name': {
-                const name = message.body?.trim();
-                if (!name || name.split(' ').length < 2) {
-                    return {
-                        response: '⚠️ Por favor, informe seu *nome completo* (pelo menos duas palavras):',
-                        newStep: 'purchase_catalog_awaiting_name',
-                        data: userData
-                    };
-                }
-                userData.name = name;
-                return {
-                    response: '🏠 Agora, por favor envie seu *endereço completo* com CEP:',
-                    newStep: 'purchase_catalog_awaiting_address',
-                    data: userData
-                };
-            }
-
-            case 'purchase_catalog_awaiting_address': {
-                const address = message.body?.trim();
-                if (!address || address.length < 8) {
-                    return {
-                        response: '⚠️ Endereço inválido. Por favor, envie seu *endereço completo* com CEP:',
-                        newStep: 'purchase_catalog_awaiting_address',
-                        data: userData
-                    };
-                }
-                userData.address = address;
-                return {
-                    response: '✅ Endereço recebido! Em breve enviaremos as instruções de pagamento PIX.',
-                    newStep: 'purchase_catalog_awaiting_pix',
-                    data: userData
-                };
-            }
-
-            case 'purchase_catalog_awaiting_pix': {
-                return {
-                    response: '💳 Para finalizar, envie o comprovante do pagamento PIX para esta chave: *' + (process.env.PIX_KEY || 'chave-pix-exemplo') + '*',
-                    newStep: 'purchase_catalog_awaiting_proof',
-                    data: userData
-                };
-            }
-
-            case 'purchase_catalog_awaiting_proof': {
-                if (message.hasMedia) {
-                    userData.pixProofReceived = true;
-                    userData.pixProofTimestamp = new Date().toISOString();
-                    
-                    return {
-                        response: '🔎 Comprovante recebido! Aguarde a validação. Em breve um atendente irá te chamar. Obrigado pela compra!',
-                        newStep: 'purchase_catalog_done',
-                        data: userData
-                    };
-                } else {
-                    return {
-                        response: '⚠️ Por favor, envie o *comprovante do pagamento PIX* como imagem.',
-                        newStep: 'purchase_catalog_awaiting_proof',
-                        data: userData
-                    };
-                }
-            }
-
-            case 'purchase_catalog_done': {
-                return {
-                    response: '✅ Seu pedido está em análise. Assim que o pagamento for validado, você receberá uma confirmação e o envio será iniciado. Se precisar de atendimento, digite "atendente".',
-                    newStep: 'start',
-                    data: userData,
-                    finalizeSession: true
-                };
-            }
-
-            default:
-                return {
-                    response: '❌ Fluxo de compra via site não reconhecido. Digite "menu" para voltar ao início.',
-                    newStep: 'start',
-                    data: userData
-                };
-        }
-    }
-
-    // =========================
-    // FLUXO DE COMPRA TRADICIONAL
-    // =========================
-    static async handlePurchase(message, userState) {
-        const step = userState.step;
-        const userData = userState.data || {};
-        
-        switch (step) {
-            case 'purchase_product_name': {
-                const productName = message.body?.trim();
-                if (!productName || productName.length < 2) {
-                    return {
-                        response: '⚠️ Por favor, informe o *nome do produto* que deseja comprar:',
-                        newStep: 'purchase_product_name',
-                        data: userData
-                    };
-                }
-                userData.productName = productName;
-                return {
-                    response: '🔗 Se você tiver o *link do produto* do *Mercado Livre*, envie agora.\n\n🏪 *NOSSA LOJA OFICIAL:*\nhttps://www.mercadolivre.com.br/loja/inaugura-lar\n\n⚠️ Se não tiver o link, responda *"não"* para pular.',
-                    newStep: 'purchase_product_link',
-                    data: userData
-                };
-            }
-
-            case 'purchase_product_link': {
-                const link = message.body?.trim();
-                if (link && (link.toLowerCase() === 'não' || link.toLowerCase() === 'nao')) {
-                    userData.productLink = '';
-                    return {
-                        response: '📸 Por favor, envie uma *foto do produto* que deseja comprar.\n\nSe não tiver foto, responda "não".',
-                        newStep: 'purchase_product_photo',
-                        data: userData
-                    };
-                }
-                if (link && !/^https?:\/\//.test(link)) {
-                    return {
-                        response: '⚠️ O link informado não parece válido. Se não tiver o link, responda "não".\n\nSe tiver, envie o link completo (começando com http).',
-                        newStep: 'purchase_product_link',
-                        data: userData
-                    };
-                }
-                if (link && /^https?:\/\//.test(link)) {
-                    userData.productLink = link;
-                    return {
-                        response: '✅ Link recebido!\n\n🔢 Quantas unidades desse produto você deseja comprar?',
-                        newStep: 'purchase_quantity',
-                        data: userData
-                    };
-                }
-                return {
-                    response: '⚠️ Por favor, envie o *link do produto* da nossa loja do Mercado Livre ou responda "não" para pular.',
-                    newStep: 'purchase_product_link',
-                    data: userData
-                };
-            }
-
-            case 'purchase_product_photo': {
-                if (message.hasMedia) {
-                    userData.productPhoto = `Foto produto compra - ${message.id._serialized}`;
-                    return {
-                        response: '🔢 Quantas unidades desse produto você deseja comprar?',
-                        newStep: 'purchase_quantity',
-                        data: userData
-                    };
-                } else if (message.body && (message.body.trim().toLowerCase() === 'não' || message.body.trim().toLowerCase() === 'nao')) {
-                    userData.productPhoto = '';
-                    return {
-                        response: '🔢 Quantas unidades desse produto você deseja comprar?',
-                        newStep: 'purchase_quantity',
-                        data: userData
-                    };
-                } else {
-                    return {
-                        response: '⚠️ Por favor, envie uma *foto do produto* ou responda "não" para pular.',
-                        newStep: 'purchase_product_photo',
-                        data: userData
-                    };
-                }
-            }
-
-            case 'purchase_quantity': {
-                const qty = parseInt(message.body?.trim());
-                if (isNaN(qty) || qty < 1) {
-                    return {
-                        response: '⚠️ Por favor, informe a *quantidade* desejada (apenas números):',
-                        newStep: 'purchase_quantity',
-                        data: userData
-                    };
-                }
-                userData.quantity = qty;
-                return {
-                    response: '❓ Tem alguma dúvida ou observação sobre o produto?\n\nSe sim, escreva agora. Se não, responda "não".',
-                    newStep: 'purchase_questions',
-                    data: userData
-                };
-            }
-
-            case 'purchase_questions': {
-                const obs = message.body?.trim();
-                userData.questions = (obs && (obs.toLowerCase() !== 'não' && obs.toLowerCase() !== 'nao')) ? obs : 'Nenhuma dúvida.';
-                const queuePosition = Math.floor(Math.random() * 5) + 1;
-                return {
-                    response: `👨‍💼 *Solicitação de Compra enviada!*\n\nVocê foi adicionado à fila de atendimento para finalizar sua compra.\n\n📦 Produto: *${userData.productName}*\n${userData.productLink ? '🔗 Link: ' + userData.productLink + '\n' : ''}${userData.productPhoto ? '📸 Foto enviada\n' : ''}🔢 Quantidade: *${userData.quantity}*\n📝 Observação: ${userData.questions}\n\n⏳ Aguarde, em breve um atendente estará com você!\n\n*Sua posição na fila:* ${queuePosition}`,
-                    newStep: 'transfer_to_human',
-                    data: {
-                        ...userData,
-                        queuePosition: queuePosition,
-                        flowType: 'purchase'
-                    }
-                };
-            }
-
-            default:
-                return {
-                    response: '❌ Erro no fluxo de compra. Digite "menu" para voltar ao início.',
                     newStep: 'start',
                     data: userData
                 };
@@ -2667,6 +2631,42 @@ let qrCodeString = '';
 let messageLog = [];
 const MAX_LOG_SIZE = 100;
 
+/**
+ * Simula o status "digitando" no WhatsApp antes de enviar uma mensagem.
+ * @param {string} chatId - ID do chat para enviar o typing.
+ * @param {string} message - Mensagem a ser enviada.
+ * @param {number} typingTimeMs - Tempo em ms simulando digitando antes de enviar.
+ * @returns {Promise<void>}
+ */
+async function sendWithTyping(chatId, message, typingTimeMs = 2000) {
+    if (!wppClient) return;
+    try {
+        await wppClient.startTyping(chatId);
+        await new Promise(resolve => setTimeout(resolve, typingTimeMs));
+        await wppClient.sendText(chatId, message);
+    } finally {
+        await wppClient.stopTyping(chatId);
+    }
+}
+
+/**
+ * Envia múltiplas mensagens em sequência simulando "digitando" entre elas.
+ * @param {string} chatId - ID do chat para enviar.
+ * @param {string[]} messages - Array de mensagens a serem enviadas.
+ * @param {number} typingTimeMs - Tempo de typing entre cada mensagem (ms).
+ * @returns {Promise<void>}
+ */
+async function sendMultipleWithTyping(chatId, messages, typingTimeMs = 2000) {
+    if (!wppClient) return;
+    for (let i = 0; i < messages.length; i++) {
+        await sendWithTyping(chatId, messages[i], typingTimeMs);
+        // Pequeno delay extra entre mensagens para parecer mais natural
+        if (i < messages.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+}
+
 // =========================
 // FUNÇÕES DE SUPORTE
 // =========================
@@ -3032,6 +3032,10 @@ async function initializeWPPConnect() {
         });
 
         // Event: Mensagem recebida
+    // Timer de boas-vindas por usuário
+    global.welcomeTimers = global.welcomeTimers || {};
+    // Contador de resets do timer por usuário
+    global.welcomeTimerResets = global.welcomeTimerResets || {};
         wppClient.onMessage(async (message) => {
             try {
                 // Ignorar mensagens próprias
@@ -3062,23 +3066,51 @@ async function initializeWPPConnect() {
                 // Carregar estado do usuário
                 let userState = await global.loadUserState(message.from);
 
+                // Lógica especial para início do atendimento (step 'start')
+                if (!userState || userState.step === 'start') {
+                    // Limite de resets do timer por usuário
+                    const maxResets = 3;
+                    global.welcomeTimerResets[message.from] = global.welcomeTimerResets[message.from] || 0;
+                    // Se já existe um timer, reseta
+                    if (global.welcomeTimers[message.from]) {
+                        clearTimeout(global.welcomeTimers[message.from]);
+                        global.welcomeTimerResets[message.from]++;
+                    } else {
+                        global.welcomeTimerResets[message.from] = 0;
+                    }
+                    // Se excedeu o limite de resets, envia imediatamente as mensagens de boas-vindas
+                    if (global.welcomeTimerResets[message.from] >= maxResets) {
+                        await ConversationFlow.handleStart(message);
+                        delete global.welcomeTimers[message.from];
+                        delete global.welcomeTimerResets[message.from];
+                        return;
+                    }
+                    // Cria novo timer para enviar as mensagens de boas-vindas após 10s sem novas mensagens
+                    global.welcomeTimers[message.from] = setTimeout(async () => {
+                        await ConversationFlow.handleStart(message);
+                        delete global.welcomeTimers[message.from];
+                        delete global.welcomeTimerResets[message.from];
+                    }, 10000);
+                    return; // Não processa mais nada até o timer disparar
+                }
+
                 // Processar mensagem através do fluxo conversacional
                 const result = await ConversationFlow.processMessage(message, userState);
 
                 // Salvar novo estado
-                if (result.newStep) {
+                if (result && result.newStep) {
                     userState.step = result.newStep;
                     userState.data = result.data || {};
                     await global.saveUserState(message.from, userState);
                 }
 
                 // Finalizar sessão se solicitado
-                if (result.finalizeSession) {
+                if (result && result.finalizeSession) {
                     await global.saveUserState(message.from, { step: 'start', data: {} });
                 }
 
                 // Enviar resposta principal
-                if (result.response) {
+                if (result && result.response) {
                     // Caso haja botões definidos pelo fluxo, tenta enviar uma mensagem interativa
                     if (result.buttons && Array.isArray(result.buttons) && result.buttons.length > 0) {
                         let sentInteractive = false;
